@@ -52,6 +52,11 @@ bool Task::configureHook()
     if (! TaskBase::configureHook())
         return false;
 
+    /** Register BLOSC filter **/
+    char *version, *date;
+    int r = register_blosc(&version, &date);
+    printf("Blosc version info: %s (%s) (%d)\n", version, date, r);
+
     /** configuration **/
     this->config = _config.value();
 
