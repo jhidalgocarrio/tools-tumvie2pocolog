@@ -8,6 +8,7 @@
 #include <fstream>
 
 #include <opencv2/core/mat.hpp>
+#include <opencv2/calib3d.hpp>
 
 #include <base/samples/Frame.hpp>
 #include "tumvie2pocolog/TaskBase.hpp"
@@ -34,13 +35,7 @@ namespace tumvie2pocolog{
         std::vector<double> p;
     };
 
-    struct IMU
-    {
-        std::vector<base::Vector6d> values;
-        std::vector<double> t;
-    };
-
-    /*! \class Task
+     /*! \class Task
      * \brief The task context provides and requires services. It uses an ExecutionEngine to perform its functions.
      * Essential interfaces are operations, data flow ports and properties. These interfaces have been defined using the oroGen specification.
      * In order to modify the interfaces you should (re)use oroGen and rely on the associated workflow.
@@ -69,9 +64,7 @@ tasks/Task.cpp, and will be put in the tumvie2pocolog namespace.
         tumvie2pocolog::Config config;
 
         /** Variable **/
-        ::base::Time starting_time;
         tumvie2pocolog::Event events;
-        tumvie2pocolog::IMU imu;
         std::vector<long double> image_ts;
         std::vector<std::string> img_fname;
 
@@ -85,6 +78,14 @@ tasks/Task.cpp, and will be put in the tumvie2pocolog namespace.
     protected:
 
         void readH5Dataset(std::string fname, std::string dataset, std::vector<double> &data);
+
+        void writeEvents(const float &t_offset);
+
+        bool writeIMU(const std::string &fname);
+
+        void writeRGB();
+
+        cv::Mat RGBToEventFrame(cv::Mat &frame,  cv::Mat &P, int &height, int &width);
 
     public:
         /** TaskContext constructor for Task
@@ -202,7 +203,6 @@ tasks/Task.cpp, and will be put in the tumvie2pocolog namespace.
             calib.width = resolution[0].asInt();
             calib.height = resolution[1].asInt();
 
-
             Json::Value camera_info = calib_data["value0"]["intrinsics"][std::stoi(cam_id)];
             intrinsics_parser(camera_info["intrinsics"]);
             distort_coeff_parser(camera_info["intrinsics"]);
@@ -210,6 +210,10 @@ tasks/Task.cpp, and will be put in the tumvie2pocolog namespace.
 
             Json::Value extrinsics = calib_data["value0"]["T_imu_cam"][std::stoi(cam_id)];
             extrinsics_parser(extrinsics);
+
+            calib.Rr = cv::Mat_<double>::eye(3, 3); //Identity
+
+            cv::fisheye::estimateNewCameraMatrixForUndistortRectify(calib.K, calib.D, cv::Size(calib.width, calib.height), calib.Rr, calib.Kr);
 
             return calib;
         }
