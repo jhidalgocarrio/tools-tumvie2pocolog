@@ -128,17 +128,30 @@ bool Viz::configureHook()
     if (! VizBase::configureHook())
         return false;
 
+    /* Path to calib file **/
     this->calib_file = _calib_file.value();
 
     /* read the calibration files **/
     fs::path calib_fname = fs::path(this->calib_file);
     this->event_cam_calib = Task::readCameraInfo(calib_fname.string(),_event_camera_idx.value());
+
+    /** Compute the projection matrix for the Event camera **/
+    cv::Mat R = cv::Mat_<double>::eye(3, 3); cv::Mat t = cv::Mat_<double>::zeros(3, 1);//rows x cols
+    cv::hconcat(this->event_cam_calib.K*R, this->event_cam_calib.K*t, this->event_cam_calib.P);
+
+    /** Get the mapping functions for camera**/
+    cv::fisheye::initUndistortRectifyMap(this->event_cam_calib.K, this->event_cam_calib.D,
+                            cv::Mat(), this->event_cam_calib.P,
+                            cv::Size(this->event_cam_calib.width, this->event_cam_calib.height),
+                            CV_32FC1, this->event_cam_calib.mapx, this->event_cam_calib.mapy);
+
     std::cout<<"EVENT CAMERA\nD:"<<this->event_cam_calib.D<<std::endl;
     std::cout<<"distortion model:"<<this->event_cam_calib.distortion_model<<std::endl;
     std::cout<<"Image Size ["<<this->event_cam_calib.height<<" x "<<this->event_cam_calib.width<<"]"<<std::endl;
     std::cout<<"K:\n"<<this->event_cam_calib.K<<std::endl;
-    std::cout<<"Kr:\n"<<this->event_cam_calib.Kr<<std::endl;
-    std::cout<<"Rr:\n"<<this->event_cam_calib.Rr<<std::endl;
+    std::cout<<"P:\n"<<this->event_cam_calib.P<<std::endl;
+    std::cout<<"mapx: "<<this->event_cam_calib.mapx.rows<<" x "<<this->event_cam_calib.mapx.cols<<std::endl;
+    std::cout<<"mapy: "<<this->event_cam_calib.mapy.rows<<" x "<<this->event_cam_calib.mapy.cols<<std::endl;
     std::cout<<"T_imu_cam:\n"<<this->event_cam_calib.T_imu_cam.matrix()<<std::endl;
 
     return true;
@@ -179,7 +192,7 @@ void Viz::updateHook()
         /** Undistort events pixel coordinates**/
         std::vector<cv::Point2f> coord_rect;
         cv::fisheye::undistortPoints(coord, coord_rect, this->event_cam_calib.K, this->event_cam_calib.D,
-                            this->event_cam_calib.Rr, this->event_cam_calib.Kr);
+                            cv::Mat(), this->event_cam_calib.P);
 
         //std::cout<<"[UPDATE_HOOK] coord: " << coord[0] <<" coord_rect: "<< coord_rect[0] <<std::endl;
 
@@ -287,8 +300,8 @@ cv::Mat Viz::createFrame (cv::Mat &img_frame, cv::Mat &event_frame)
         return img_frame;
 
     /** Output image **/    
-    cv::Mat out_img;//img_frame.copyTo(out_img);
-    out_img = cv::Mat(img_frame.size(), CV_8UC3, cv::Scalar(0.0));
+    cv::Mat out_img; img_frame.copyTo(out_img);
+    //out_img = cv::Mat(img_frame.size(), CV_8UC3, cv::Scalar(0.0));
     std::cout<<"out_img "<<out_img.size()<<" TYPE: "<<type2str(out_img.type())<<std::endl;
 
     /** Event colors **/
