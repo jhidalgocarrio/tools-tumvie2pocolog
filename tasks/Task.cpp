@@ -66,15 +66,43 @@ bool Task::configureHook()
     this->event_cam_calib = Task::readCameraInfo(calib_fname.string(), this->config.event_camera_idx);
     this->rgb_cam_calib = Task::readCameraInfo(calib_fname.string(), this->config.rgb_camera_idx);
 
+    /** Get the T_cam_event_cam_rgb transformation **/
+    Eigen::Matrix4d T_event_rgb = (this->event_cam_calib.T_imu_cam.inverse() * this->rgb_cam_calib.T_imu_cam).matrix();
+    cv::Mat T; cv::eigen2cv(T_event_rgb, T);
+    std::cout<<"T_event_rgb:\n"<<T<<std::endl;
+
+    /** Compute the projection matrix for the Event camera **/
+    cv::Mat R = cv::Mat_<double>::eye(3, 3); cv::Mat t = cv::Mat_<double>::zeros(3, 1);//rows x cols
+    //std::cout<<"R:\n"<<R<<"\nt:\n"<<t<<std::endl;
+    cv::hconcat(this->event_cam_calib.K*R, this->event_cam_calib.K*t, this->event_cam_calib.P);
+
+    /** Compute the projection matrix for the RGB camera **/
+    R = T(cv::Rect(0,0,3,3)).clone(); t = T(cv::Rect(3,0,1,3)).clone();
+    //std::cout<<"R:\n"<<R<<"\nt:\n"<<t<<std::endl;
+    cv::hconcat(this->event_cam_calib.K*R, this->event_cam_calib.K*t, this->rgb_cam_calib.P);
+
+    /** Get the mapping functions for event camera**/
+    cv::fisheye::initUndistortRectifyMap(this->event_cam_calib.K, this->event_cam_calib.D,
+                            cv::Mat(), this->event_cam_calib.P,
+                            cv::Size(this->event_cam_calib.width, this->event_cam_calib.height),
+                            CV_32FC1, this->event_cam_calib.mapx, this->event_cam_calib.mapy);
+
+    /** Get the mapping functions for rgb camera**/
+    cv::fisheye::initUndistortRectifyMap(this->rgb_cam_calib.K, this->rgb_cam_calib.D,
+                            cv::Mat(), this->rgb_cam_calib.P,
+                            cv::Size(this->event_cam_calib.width, this->event_cam_calib.height),
+                            CV_32FC1, this->rgb_cam_calib.mapx, this->rgb_cam_calib.mapy);
+
     std::cout<<"CALIB EVENT CAM:"<<this->config.event_camera_idx<<std::endl;
     std::cout<<"Model:"<<this->event_cam_calib.distortion_model<<std::endl;
     std::cout<<"Height:"<<this->event_cam_calib.height<<std::endl;
     std::cout<<"Width:"<<this->event_cam_calib.width<<std::endl;
     std::cout<<"K:"<<this->event_cam_calib.K<<std::endl;
     std::cout<<"D:"<<this->event_cam_calib.D<<std::endl;
-    std::cout<<"Kr:"<<this->event_cam_calib.Kr<<std::endl;
-    std::cout<<"Rr:"<<this->event_cam_calib.Rr<<std::endl;
-    std::cout<<"T:"<<this->event_cam_calib.T_imu_cam.matrix()<<std::endl;
+    std::cout<<"P:"<<this->event_cam_calib.P<<std::endl;
+    std::cout<<"mapx: "<<this->event_cam_calib.mapx.rows<<" x "<<this->event_cam_calib.mapx.cols<<std::endl;
+    std::cout<<"mapy: "<<this->event_cam_calib.mapy.rows<<" x "<<this->event_cam_calib.mapy.cols<<std::endl;
+    std::cout<<"T_imu_cam:"<<this->event_cam_calib.T_imu_cam.matrix()<<std::endl;
 
     std::cout<<"CALIB RGB CAM:"<<this->config.rgb_camera_idx<<std::endl;
     std::cout<<"Model:"<<this->rgb_cam_calib.distortion_model<<std::endl;
@@ -82,9 +110,10 @@ bool Task::configureHook()
     std::cout<<"Width:"<<this->rgb_cam_calib.width<<std::endl;
     std::cout<<"K:"<<this->rgb_cam_calib.K<<std::endl;
     std::cout<<"D:"<<this->rgb_cam_calib.D<<std::endl;
-    std::cout<<"Kr:"<<this->rgb_cam_calib.Kr<<std::endl;
-    std::cout<<"Rr:"<<this->rgb_cam_calib.Rr<<std::endl;
-    std::cout<<"T:"<<this->rgb_cam_calib.T_imu_cam.matrix()<<std::endl;
+    std::cout<<"P:"<<this->rgb_cam_calib.P<<std::endl;
+    std::cout<<"mapx: "<<this->rgb_cam_calib.mapx.rows<<" x "<<this->rgb_cam_calib.mapx.cols<<std::endl;
+    std::cout<<"mapy: "<<this->rgb_cam_calib.mapy.rows<<" x "<<this->rgb_cam_calib.mapy.cols<<std::endl;
+    std::cout<<"T_imu_cam:"<<this->rgb_cam_calib.T_imu_cam.matrix()<<std::endl;
 
     /** Read images timestamps **/
     fs::path img_ts_fname = fs::path(config.root_folder)/ fs::path(config.img_ts_filename);
@@ -367,16 +396,6 @@ bool Task::writeIMU(const std::string &fname)
 
 void Task::writeRGB()
 {
-    /** Get the T_cam_event_cam_rgb transformation **/
-    Eigen::Matrix4d T_event_rgb = (this->event_cam_calib.T_imu_cam.inverse() * this->rgb_cam_calib.T_imu_cam).matrix();
-    cv::Mat T; cv::eigen2cv(T_event_rgb, T);
-
-    std::cout<<"T_event_rgb:\n"<<T<<std::endl;
-
-    /** Compute the projection matrix for the backward warping **/
-    cv::Mat R = T(cv::Rect(0,0,3,3)).clone();
-    cv::Mat P = this->rgb_cam_calib.Kr * this->rgb_cam_calib.Rr * R * this->event_cam_calib.Rr.t() * this->event_cam_calib.Kr.inv();
-
     /** Write the images **/
     auto it_img =this->img_fname.begin();
     auto it_ts =this->image_ts.begin();
@@ -386,8 +405,8 @@ void Task::writeRGB()
         /** Read the image file **/
         cv::Mat orig_img = cv::imread(*it_img, cv::IMREAD_COLOR);
 
-        /** Project the image in the event camera frame **/
-        cv::Mat img = this->RGBToEventFrame(orig_img, P, this->event_cam_calib.height, this->event_cam_calib.width);
+        /** Remap RGB image in the event camera frame **/
+        cv::Mat img; remap(orig_img, img, this->rgb_cam_calib.mapx, this->rgb_cam_calib.mapy, cv::INTER_CUBIC);
 
         /** Convert from cv mat to frame **/
         ::base::samples::frame::Frame *img_msg_ptr = this->img_msg.write_access();

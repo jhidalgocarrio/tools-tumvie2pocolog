@@ -18,9 +18,9 @@ namespace tumvie2pocolog{
     struct CameraCalib
     {
         cv::Mat K; // intrinsics
-        cv::Mat Kr; //rectified K
         cv::Vec4d D; //distortion
-        cv::Mat Rr;// rect matrix
+        cv::Mat P;// projection matrix
+        cv::Mat mapx, mapy;// mapping matrix
         std::string distortion_model; //model
         int height, width; //image size
         base::Transform3d T_imu_cam; //Transformation matrix in TUM-Vie T_imu_cam
@@ -210,10 +210,6 @@ tasks/Task.cpp, and will be put in the tumvie2pocolog namespace.
 
             Json::Value extrinsics = calib_data["value0"]["T_imu_cam"][std::stoi(cam_id)];
             extrinsics_parser(extrinsics);
-
-            calib.Rr = cv::Mat_<double>::eye(3, 3); //Identity
-
-            cv::fisheye::estimateNewCameraMatrixForUndistortRectify(calib.K, calib.D, cv::Size(calib.width, calib.height), calib.Rr, calib.Kr);
 
             return calib;
         }
